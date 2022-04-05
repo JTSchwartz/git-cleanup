@@ -9,14 +9,20 @@ import (
 	"github.com/urfave/cli/v2"
 )
 
+type branch struct {
+	name string
+	date string
+}
+
+var dryRun bool
+var quiet bool
+var maxAge int
+
 func main() {
-	var dryRun bool
-	var quiet bool
-	var maxAge int
 
 	app := &cli.App{
-		Name:  "git-repo",
-		Usage: "Open the current repo in browser",
+		Name:  "git-cleanup",
+		Usage: "Delete all stale branches",
 		Flags: []cli.Flag{
 			&cli.BoolFlag{
 				Name:        "dry-run",
@@ -40,27 +46,15 @@ func main() {
 				Destination: &maxAge,
 			},
 		},
-		Action: func(c *cli.Context) error {
-			if branches, err := GetBranchDates(); err == nil {
-				for _, staleBranch := range filterForActiveBranches(branches, maxAge) {
-					if !quiet {
-						fmt.Printf("Deleted branch: %s", staleBranch)
-					}
+		Action: func(c *cli.Context) (e error) {
+			allBranches := make(chan branch)
+			staleBranches := make(chan string)
 
-					if dryRun {
-						fmt.Printf("Branch %s is stale", staleBranch)
-						continue
-					}
+			go GetBranchDates(allBranches)
+			go filterForActiveBranches(allBranches, staleBranches)
+			go DeleteStaleBranches(staleBranches)
 
-					err = DeleteBranch(staleBranch)
-					if err != nil {
-						fmt.Fprintf(os.Stderr, "An error occured while deleting branch: %s\n%s", staleBranch, err.Error())
-					}
-				}
-			} else {
-				return err
-			}
-			return nil
+			return
 		},
 	}
 
@@ -69,16 +63,34 @@ func main() {
 	}
 }
 
-func filterForActiveBranches(branches map[string]string, maxAge int) []string {
+func filterForActiveBranches(input chan branch, output chan string) {
+	defer close(output)
 	maxAge *= 24
-	staleBranches := make([]string, 0)
 
-	for branch, date := range branches {
-		lastUpdated, _ := time.Parse("2006-01-02", date)
+	for branch := range input {
+		lastUpdated, _ := time.Parse("2006-01-02", branch.date)
+
 		if time.Now().Sub(lastUpdated).Hours() > float64(maxAge) {
-			staleBranches = append(staleBranches, branch)
+			if dryRun {
+				fmt.Printf("Branch %s is stale", branch.name)
+				continue
+			}
+
+			output <- branch.name
 		}
 	}
+}
 
-	return staleBranches
+func DeleteStaleBranches(input chan string) {
+	for branch := range input {
+		err := DeleteBranch(branch)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "An error occured when attempted to delete branch: %s\n%s\n", branch, err.Error())
+			continue
+		}
+
+		if !quiet {
+			fmt.Printf("Deleted branch: %s", branch)
+		}
+	}
 }

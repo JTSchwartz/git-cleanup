@@ -3,22 +3,29 @@ package main
 import (
 	"bytes"
 	"errors"
+	"fmt"
 	"io/ioutil"
+	"os"
 	"os/exec"
 	"strings"
 	"syscall"
 )
 
-func GetBranchDates() (m map[string]string, e error) {
+func GetBranchDates(output chan branch) {
+	defer close(output)
 	branchesByDate, e := execGit([]string{"--no-pager", "branch", "-l", "--format=\"%(committerdate:short)|%(refname:short)\""})
 	if e != nil {
+		fmt.Fprintln(os.Stderr, "Unable to find any git branches.")
+		close(output)
 		return
 	}
 
-	m = make(map[string]string)
 	for _, str := range strings.Split(branchesByDate, "\n") {
 		parts := strings.SplitN(str, "|", 2)
-		m[parts[1]] = parts[0]
+		output <- branch{
+			name: parts[1],
+			date: parts[0],
+		}
 	}
 	return
 }
