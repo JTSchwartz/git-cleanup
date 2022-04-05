@@ -9,12 +9,23 @@ import (
 	"syscall"
 )
 
-func GetBranchDates() (string, error) {
-	return execGit([]string{"--no-pager", "branch", "-l", "--format=\"%(committerdate:short) | %(refname:short)\""})
+func GetBranchDates() (m map[string]string, e error) {
+	branchesByDate, e := execGit([]string{"--no-pager", "branch", "-l", "--format=\"%(committerdate:short)|%(refname:short)\""})
+	if e != nil {
+		return
+	}
+
+	m = make(map[string]string)
+	for _, str := range strings.Split(branchesByDate, "\n") {
+		parts := strings.SplitN(str, "|", 2)
+		m[parts[1]] = parts[0]
+	}
+	return
 }
 
-func DeleteBranch(branch string) (string, error) {
-	return execGit([]string{"branch", "-D", branch})
+func DeleteBranch(branch string) (err error) {
+	_, err = execGit([]string{"branch", "-D", branch})
+	return
 }
 
 func execGit(gitArgs []string) (string, error) {
@@ -33,5 +44,6 @@ func execGit(gitArgs []string) (string, error) {
 		return "", err
 	}
 
-	return strings.TrimRight(stdout.String(), "\000\n"), nil
+	output := strings.ReplaceAll(stdout.String(), "\"", "")
+	return strings.TrimRight(output, "\000\n"), nil
 }
